@@ -1,0 +1,348 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Journey planner : prototype</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root{
+      --panel-w:360px;
+      --accent:#1976d2;
+      --muted:#666;
+      --bg:#f7f8fa;
+    }
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    .app{display:flex;height:100vh}
+    .panel{width:var(--panel-w);padding:18px;box-sizing:border-box;border-right:1px solid #eee;background:white;overflow:auto}
+    .mapwrap{flex:1;position:relative}
+    #map{position:absolute;inset:0}
+    h1{font-size:18px;margin:0 0 10px 0}
+    label{display:block;margin-top:12px;font-size:13px;color:#222}
+    input[type="text"], input[type="date"], input[type="time"], select{
+      width:100%;padding:8px 10px;margin-top:6px;border:1px solid #d0d4d9;border-radius:6px;box-sizing:border-box;
+    }
+    .row{display:flex;gap:8px}
+    .row .col{flex:1}
+    button{
+      margin-top:14px;padding:10px 12px;border:none;background:var(--accent);color:white;border-radius:8px;cursor:pointer;font-weight:600;
+    }
+    button[disabled]{opacity:.6;cursor:not-allowed}
+    .meta{margin-top:12px;font-size:13px;color:var(--muted)}
+    .tips{margin-top:14px;padding:12px;background:var(--bg);border-radius:6px;font-size:13px;color:#222}
+    .results{margin-top:12px;padding:12px;border-radius:6px;background:#fff8f0;border:1px solid #ffd8b6}
+    .result-row{display:flex;justify-content:space-between;align-items:center;margin-top:6px}
+    .label{color:var(--muted);font-size:13px}
+    .value{font-weight:700;color:#111}
+    .small{font-size:12px;color:var(--muted);margin-top:6px}
+    .spark{height:64px;margin-top:8px}
+    /* Loading overlay */
+    .loading-overlay{
+      position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,0.7);z-index:9999;
+    }
+    .loading-overlay.show{display:flex}
+    .spinner{
+      width:64px;height:64px;border-radius:50%;border:6px solid rgba(0,0,0,0.08);border-top-color:var(--accent);animation:spin 1s linear infinite;box-shadow:0 6px 20px rgba(0,0,0,0.06)
+    }
+    @keyframes spin{to{transform:rotate(360deg)}}
+    /* Responsive small screens */
+    @media (max-width:880px){
+      .panel{width:100%;height:40vh;border-right:none;border-bottom:1px solid #eee}
+      .app{flex-direction:column}
+      .mapwrap{height:60vh}
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="panel" id="leftPanel">
+      <h1>Journey planner </h1>
+
+<!--
+      <label for="journeySelect">Choose journey (or enter OD below)</label>
+      <select id="journeySelect">
+        <option value=""> -- select demo journey -- </option>
+        <option value="home->school">Home → School</option>
+        <option value="school->home">School → Home</option>
+        <option value="home->work">Home → Work</option>
+      </select>
+-->
+      <label for="origin">Origin (lat,lng or name)</label>
+      <input id="origin" type="text" placeholder="e.g. 6.9062614,79.9697339" value="6.9062614,79.9697339">
+
+      <label for="destination">Destination (lat,lng or name)</label>
+      <input id="destination" type="text" placeholder="e.g. 6.9076979,79.8580987" value="6.9076979,79.8580987">
+
+      <div class="row">
+        <div class="col">
+          <label for="arrivalDate">Arrival date</label>
+          <input id="arrivalDate" type="date">
+        </div>
+        <div class="col">
+          <label for="arrivalTime">Arrival time</label>
+          <input id="arrivalTime" type="time" step="60">
+        </div>
+      </div>
+
+      <button id="getBtn">Get suggestions</button>
+
+      <div class="meta">Sample values are prefilled. Use journey dropdown for quick tests.</div>
+
+      <div class="results" id="results" style="display:none">
+        <div class="result-row"><div class="label">Suggested leave time</div><div class="value" id="leaveTime">--</div></div>
+        <div class="result-row"><div class="label">Predicted travel time</div><div class="value" id="predTime">--</div></div>
+        <div class="result-row"><div class="label">Route summary</div><div class="value" id="summary">--</div></div>
+        <div class="small" id="tipsArea"></div>
+        <div class="spark" id="sparkSvg"></div>
+      </div>
+
+      <div class="tips" id="tips">
+        <strong>Tips</strong>
+        <ul style="margin:8px 0 0 18px;padding:0">
+          <li>Prefer lat,lng for precision (e.g., <code>6.90,79.86</code>).</li>
+          <li>We call backend to compute departure suggestion and return route polyline.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mapwrap">
+      <div id="map"></div>
+
+      <div class="loading-overlay" id="loadingOverlay">
+        <div style="text-align:center">
+          <div class="spinner"></div>
+          <div style="margin-top:10px;color:#333;font-weight:600">Finding best time…</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Leaflet -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+  /***********************
+   * CONFIG - set your API endpoint
+   ***********************/
+  const API_URL = "https://YOUR_API_GATEWAY.execute-api.YOUR_REGION.amazonaws.com/prod/predict"; // <--- set this
+
+  /***********************
+   * Map setup (Leaflet)
+   ***********************/
+  const map = L.map('map', {zoomControl:true}).setView([7, 80],11);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 25,
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+  const routeLayer = L.layerGroup().addTo(map);
+  const markerLayer = L.layerGroup().addTo(map);
+
+  /***********************
+   * Helpers
+   ***********************/
+  function showLoading(show){
+    const el = document.getElementById('loadingOverlay');
+    if(show) el.classList.add('show'); else el.classList.remove('show');
+  }
+
+  function el(id){ return document.getElementById(id); }
+
+  // decode google encoded polyline -> array of [lat,lng]
+  function decodePolyline(encoded) {
+    if(!encoded) return [];
+    let index = 0, lat = 0, lng = 0, coordinates = [];
+    while (index < encoded.length) {
+      let shift = 0, result = 0, b;
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      const dlat = ((result & 1) ? ~(result >> 1) : (result >> 1));
+      lat += dlat;
+
+      shift = 0; result = 0;
+      do {
+        b = encoded.charCodeAt(index++) - 63;
+        result |= (b & 0x1f) << shift;
+        shift += 5;
+      } while (b >= 0x20);
+      const dlng = ((result & 1) ? ~(result >> 1) : (result >> 1));
+      lng += dlng;
+
+      coordinates.push([lat * 1e-5, lng * 1e-5]);
+    }
+    return coordinates;
+  }
+
+  function renderRouteFromPolyline(encoded){
+    routeLayer.clearLayers();
+    markerLayer.clearLayers();
+    const coords = decodePolyline(encoded);
+    if(coords.length===0) return;
+    const latlngs = coords.map(c => [c[0], c[1]]);
+    const poly = L.polyline(latlngs, {color:'#1976d2', weight:4, opacity:0.9}).addTo(routeLayer);
+    map.fitBounds(poly.getBounds(), {padding:[40,40]});
+    L.marker(latlngs[0]).addTo(markerLayer).bindPopup('Start');
+    L.marker(latlngs[latlngs.length-1]).addTo(markerLayer).bindPopup('End');
+  }
+
+  function isoToLocalDisplay(isoStr){
+    if(!isoStr) return '--';
+    const d = new Date(isoStr);
+    // format HH:MM
+    return d.toLocaleString();
+  }
+
+  // small sparkline using inline SVG - accepts array of numbers
+  function drawSparkline(data){
+    const w = 240, h = 64, pad = 6;
+    const container = el('sparkSvg') || el('sparkSvg');
+    // remove old
+    document.getElementById('sparkSvg').innerHTML = '';
+    if(!data || data.length===0) return;
+    const min = Math.min(...data), max = Math.max(...data);
+    const scaleY = v => {
+      if(max===min) return h/2;
+      return h - pad - ((v - min) / (max - min)) * (h - pad*2);
+    };
+    const step = (w - pad*2) / (data.length - 1 || 1);
+    let path = '';
+    data.forEach((v,i)=>{
+      const x = pad + i*step;
+      const y = scaleY(v);
+      path += (i===0 ? `M ${x} ${y}` : ` L ${x} ${y}`);
+    });
+    const svg = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
+      <path d="${path}" fill="none" stroke="#1976d2" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+    </svg>`;
+    document.getElementById('sparkSvg').innerHTML = svg;
+  }
+
+  /***********************
+   * Call backend and render
+   ***********************/
+  async function callPredictAPI(payload){
+    // payload: { origin, destination, arrival_iso } -> returns small response
+    const resp = await fetch(API_URL, {
+      method:'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+    if(!resp.ok){
+      const text = await resp.text();
+      throw new Error('API error: ' + resp.status + ' - ' + text);
+    }
+    return resp.json();
+  }
+
+  async function runSuggestion(){
+    try{
+      // read inputs
+      const journey = el('journeySelect').value;
+      let origin = el('origin').value.trim();
+      let destination = el('destination').value.trim();
+
+      // if journey selected, optionally override origin/destination from a mapping (left for backend)
+      if(journey && (!origin || !destination)){
+        // we still let backend resolve journey id if client provides only journey id
+      }
+
+      const date = el('arrivalDate').value;
+      const time = el('arrivalTime').value;
+      if(!date || !time){
+        alert('Please provide arrival date and time');
+        return;
+      }
+      // create an ISO datetime in local timezone (frontend)
+      const arrivalIso = new Date(date + 'T' + time + ':00').toISOString();
+
+      const payload = {
+        journey_id: journey || null,
+        origin: origin || null,
+        destination: destination || null,
+        arrival_time_iso: arrivalIso
+      };
+
+      // show spinner
+      showLoading(true);
+      el('results').style.display = 'none';
+      el('tipsArea').innerText = '';
+
+      const result = await callPredictAPI(payload);
+      // expected minimal response shape:
+      // { suggested_leave_iso: "...", predicted_travel_minutes: 23, overview_polyline: "<encoded>", summary: "A-B", tips: "text", spark_values: [..] }
+
+      // defensive checks
+      const leaveIso = result.suggested_leave_iso || null;
+      const predMin = result.predicted_travel_minutes || result.predicted_travel_time_minutes || null;
+      const poly = result.overview_polyline || (result.routes && result.routes[0] && result.routes[0].overview_polyline && result.routes[0].overview_polyline.points) || null;
+      const summary = result.summary || (result.routes && result.routes[0] && result.routes[0].summary) || '';
+      const tips = result.tips || '';
+
+      // update UI
+      el('leaveTime').innerText = leaveIso ? new Date(leaveIso).toLocaleString() : '--';
+      el('predTime').innerText = predMin ? `${predMin} mins` : '--';
+      el('summary').innerText = summary;
+      el('tipsArea').innerText = tips;
+      el('results').style.display = 'block';
+
+      // route
+      if(poly){
+        renderRouteFromPolyline(poly);
+      }
+
+      // spark values (small array of future travel times)
+      if(Array.isArray(result.spark_values)){
+        drawSparkline(result.spark_values);
+      } else {
+        // fallback: draw nothing or synthetic
+        drawSparkline([]);
+      }
+
+    } catch(err){
+      console.error(err);
+      alert('Error: ' + err.message);
+    } finally {
+      showLoading(false);
+    }
+  }
+
+  /***********************
+   * UI wiring
+   ***********************/
+  el('getBtn').addEventListener('click', runSuggestion);
+
+  // when a journey is chosen, optionally autofill origin/destination (demo only)
+  el('journeySelect').addEventListener('change', () => {
+    const v = el('journeySelect').value;
+    if(v === 'home->school'){
+      el('origin').value = '6.9062614,79.9697339';
+      el('destination').value = '6.9076979,79.8580987';
+    } else if(v === 'school->home'){
+      el('origin').value = '6.9076979,79.8580987';
+      el('destination').value = '6.9062614,79.9697339';
+    } else if(v === 'home->work'){
+      el('origin').value = '6.9062614,79.9697339';
+      el('destination').value = '6.930000,79.860000';
+    } else {
+      // clear (no-op)
+    }
+  });
+
+  // small convenience: set arrival date to today by default
+  (function setDefaults(){
+    const today = new Date();
+    const yyyy = today.getFullYear().toString().padStart(4,'0');
+    const mm = (today.getMonth()+1).toString().padStart(2,'0');
+    const dd = today.getDate().toString().padStart(2,'0');
+    el('arrivalDate').value = `${yyyy}-${mm}-${dd}`;
+    // set current +30 minutes as default arrival time
+    const t = new Date(today.getTime() + 30*60000);
+    const hh = t.getHours().toString().padStart(2,'0'), mi = t.getMinutes().toString().padStart(2,'0');
+    el('arrivalTime').value = `${hh}:${mi}`;
+  })();
+
+  </script>
+</body>
+</html>
