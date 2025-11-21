@@ -239,7 +239,8 @@
   async function runSuggestion(){
     try{
       // read inputs
-      const journey = el('journeySelect').value;
+      //const journey = el('journeySelect').value;
+	  const journey = null
       let origin = el('origin').value.trim();
       let destination = el('destination').value.trim();
 
@@ -314,6 +315,7 @@
   el('getBtn').addEventListener('click', runSuggestion);
 
   // when a journey is chosen, optionally autofill origin/destination (demo only)
+  /*
   el('journeySelect').addEventListener('change', () => {
     const v = el('journeySelect').value;
     if(v === 'home->school'){
@@ -329,6 +331,7 @@
       // clear (no-op)
     }
   });
+  */
 
   // small convenience: set arrival date to today by default
   (function setDefaults(){
@@ -346,5 +349,3 @@
   </script>
 </body>
 </html>
-
-
