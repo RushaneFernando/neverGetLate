@@ -80,6 +80,32 @@
       font-size:13px;
       color:#333;
     }
+	
+	/* Road composition table */
+	.road-table {
+	  width: 100%;
+	  border-collapse: collapse;
+	  margin-top: 10px;
+	  font-size: 13px;
+	}
+
+	.road-table th,
+	.road-table td {
+	  border-bottom: 1px solid #e0e0e0;
+	  padding: 6px 4px;
+	  text-align: left;
+	}
+
+	.road-table th {
+	  font-weight: 600;
+	  color: #444;
+	}
+
+	.road-table td:last-child {
+	  text-align: right;
+	  font-weight: 600;
+	}
+
 
     /* Loading overlay */
     .loading-overlay{
@@ -151,6 +177,22 @@
           <div class="label">Tips</div>
           <div class="value" id="tips">--</div>
         </div>
+		
+		<div class="result-row" id="roadCompositionRow" style="display:none;">
+		  <div class="label">Road composition</div>
+		  <div class="value">
+			<table class="road-table" id="roadTable">
+			  <thead>
+				<tr>
+				  <th>Road type</th>
+				  <th>% of the Journey</th>
+				</tr>
+			  </thead>
+			  <tbody></tbody>
+			</table>
+		  </div>
+		</div>
+
 		
       </div>
 
@@ -311,6 +353,35 @@
 
 	  return true;
 	}
+	
+	function renderRoadComposition(roadComposition) {
+	  const row = el('roadCompositionRow');
+	  const tbody = el('roadTable').querySelector('tbody');
+
+	  tbody.innerHTML = '';
+
+	  if (!Array.isArray(roadComposition) || roadComposition.length === 0) {
+		row.style.display = 'none';
+		return;
+	  }
+
+	  roadComposition.forEach(r => {
+		const tr = document.createElement('tr');
+
+		const typeTd = document.createElement('td');
+		typeTd.innerText = r.road_type.replace(/_/g, ' ');
+
+		const pctTd = document.createElement('td');
+		pctTd.innerText = `${Math.round(r.percentage * 100)}%`;
+
+		tr.appendChild(typeTd);
+		tr.appendChild(pctTd);
+		tbody.appendChild(tr);
+	  });
+
+	  row.style.display = 'block';
+	}
+
 
 
 
@@ -345,6 +416,9 @@
         const summary = result.summary || (result.routes?.[0]?.summary) || '';
         //const tips = result.tips || '';
 		const alternatives = result.alternatives || null;
+		
+		renderRoadComposition(result.road_composition);
+
 		
 
 		//distance
